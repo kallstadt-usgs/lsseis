@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from obspy import UTCDateTime
 import obspy.realtime.signal as signal
 from scipy import signal as spsignal
+import scipy.sparse
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -45,7 +46,7 @@ def transformSignals(st, plot_checkcalcs = False):
     # Iterate through every channel in stream
     for t in range(0,len(st)):     
         # Take kurtosis of trace
-        F1 = signal.kurtosis(st[t], win=5000.0)
+        F1 = signal.kurtosis(st[t], win=5.0)
             
         # Change first part of signal to avoid initial noise
         F1[:1000] = F1[1000]
