@@ -1,10 +1,13 @@
 import numpy as np
 import pandas as pd
 from obspy.signal.trigger import coincidence_trigger as ct
-from obspy import UTCDateTime
+import obspy.signal.filter as filte
+from obspy import UTCDateTime, Stream
 from reviewData import reviewData
 from removeTeleseisms import removeTeleseisms
-from findFirstArrivals import findFirstArrivals
+from findFirstArrivals import findFirstArrivals, transformSignals
+from sigproc import sigproc
+from scipy import signal as spsignal
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -352,3 +355,96 @@ def detectAftershocks(st, trig, arrival_times1, min_stations = 3,
     print('') # Print blank line
         
     return(aftershocks)
+
+
+def detectAftershocks2(st, template, trig, 
+                       min_time = 20., threshold=0.75,
+                       method='envelopes', before=30., after=200.,
+                       smoothwin=201, smoothorder=3):
+    """
+    Loops through all triggers in trigger_times, finds the first arrival times 
+    of all traces, and compares these to those of the known event. If the arrival 
+    times are within min_time_diff for at least min_stations number of stations, 
+    an aftershock is detected.
+    INPUT
+    st - obspy stream object with seismic data
+    trig - list of coicidence_trigger objects
+    template - obspy stream of known event
+    min_stations (int) - minimum number of stations that need to display a linear
+        moveout in first arrival times for trigger to count as event
+    min_time (float) - minimum time between aftershocks to count as separate events (sec)
+    smoothwin (int): Window length in samples for Savgol smoothing of envelopes or kurtosis F3
+    smoothorder (int): Polynomial order for Savgol smoothing
+    method (str) - 'envelopes' or 'kurtosis'
+    OUTPUT
+    aftershocks (list of UTCDateTimes) - times of detected aftershocks
+    discard (list): list of discarded triggers
+    at_after (list): list of obspy streams of extfacted aftershock triggers
+    
+    """
+    
+    # Create empty list to store aftershock times
+    aftershocks = []
+    st_after = []
+    discard = []
+    
+    # Process template
+    if method == 'envelopes':
+        tproc = template.copy()
+        for tr in tproc:
+            tr.data = filte.envelope(tr.data)
+    elif method == 'kurtosis':
+        tproc = template.copy()
+        for tr in tproc:
+            tr.data = np.squeeze(transformSignals(Stream(tr), smoothwin, smoothorder))
+    else:
+        raise Exception('method specified (%s) not recognized' % method)
+    
+    
+    
+    for t in range(0,len(trig)):
+        print('Processing trigger %i of %i...' % (t+1,len(trig)))
+        print(trig[t]['time'])
+        
+        # Take slice of signal around trigger time
+        temp = st.copy().trim(trig[t]['time']-before, 
+                              trig[t]['time']+after)
+        
+        # Process trigger
+        if method == 'envelopes':
+            stproc = temp.copy()
+            for tr in stproc:
+                tr.data = spsignal.savgol_filter(filte.envelope(tr.data), smoothwin, smoothorder)
+        elif method == 'kurtosis':
+            stproc = temp.copy()
+            for tr in stproc:
+                tr.data = np.squeeze(transformSignals(Stream(tr), smoothwin, smoothorder))
+        
+        # Cross correlate
+        xcorFunc, xcorLags, ccs, times = sigproc.templateXcorrRA(stproc, tproc, threshold=threshold)
+        
+        # Find if event meets threshold
+        if len(times) == 0:
+            discard.append(trig[t])
+        else:
+            # Take highest value returned and adjust for before time to get approximate event time
+            indx = np.argmax(xcorFunc)
+            aftershocks.append(stproc[0].stats.starttime + xcorLags[indx] + before)
+    
+    # If any times in aftershocks within 1 minute of each other, save first one   
+    if len(aftershocks) > 1:
+        new_aftershocks = [aftershocks[0]] 
+        aftershocks.sort() # Sort times from earliest to latest
+        for a in range(1,len(aftershocks)):
+            if aftershocks[a] - aftershocks[a-1] > min_time:
+                new_aftershocks.append(aftershocks[a])     
+        
+        aftershocks = new_aftershocks
+    
+    for af in aftershocks:
+        st_after.append(st.copy().trim(af-before, af+after))
+        
+    print('%i aftershock(s) found.' % len(aftershocks))
+    print('') # Print blank line
+        
+    return(aftershocks, discard, st_after)

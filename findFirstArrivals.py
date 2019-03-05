@@ -21,7 +21,7 @@ findFirstArrivals - Transforms obspy stream objects in order to locate triggerin
     events in seismic signals, specifically landslides.
 """
 
-def transformSignals(st, plot_checkcalcs = False):
+def transformSignals(st, plot_checkcalcs = False, smoothwin=501, smoothorder=1):
     """
     Transforms each trace in obspy stream object to determine the "first arrival",
     or onset of the trigger that might be a landslide. Returns time of this onset
@@ -70,7 +70,7 @@ def transformSignals(st, plot_checkcalcs = False):
             F3[i] = F2[i] - (a*i + b)
             
         # Smooth F3 curve
-        F3smooth = spsignal.savgol_filter(F3,501,1)
+        F3smooth = spsignal.savgol_filter(F3,smoothwin,smoothorder)
         # Define lists of maxima and minima
         M = [] # maxima
         M_i = [] # maxima indices
